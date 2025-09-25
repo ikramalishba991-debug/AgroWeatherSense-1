@@ -13,6 +13,7 @@ from crop_data import CropDatabase
 from data_processor import DataProcessor
 from soil_database import SoilDatabase
 from seasonal_calendar import PakistanFarmingCalendar
+from multi_crop_analyzer import MultiCropAnalyzer
 from utils import get_pakistan_coordinates, validate_phone_number, determine_weather_region
 
 # Page configuration
@@ -32,10 +33,11 @@ def initialize_services():
     data_processor = DataProcessor()
     soil_db = SoilDatabase()
     farming_calendar = PakistanFarmingCalendar()
+    multi_crop_analyzer = MultiCropAnalyzer(crop_db, soil_db, farming_calendar)
     
-    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar
+    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar, multi_crop_analyzer
 
-weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar = initialize_services()
+weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar, multi_crop_analyzer = initialize_services()
 
 # Main title
 st.title("🌾 AI-Powered Agricultural Analysis System")
@@ -516,6 +518,279 @@ if 'error' not in crop_schedule:
             st.write("Critical factors: " + ", ".join(period['critical_factors']))
 else:
     st.error(f"Could not load schedule for {crop_type}: {crop_schedule.get('error', 'Unknown error')}")
+
+# Multi-Crop Analysis Section
+st.markdown("---")
+st.header("🔍 Multi-Crop Analysis & Comparison")
+
+# Multi-crop selection
+st.subheader("Select Multiple Crops for Analysis")
+available_crops = ["Wheat", "Rice", "Cotton", "Sugarcane", "Maize", "Mango", "Onion"]
+
+col_multi1, col_multi2 = st.columns(2)
+
+with col_multi1:
+    selected_crops = st.multiselect(
+        "Choose crops to compare (2-4 crops recommended):",
+        available_crops,
+        default=[crop_type] if crop_type in available_crops else [available_crops[0]],
+        max_selections=4
+    )
+    
+    analysis_type = st.selectbox(
+        "Analysis Type:",
+        ["comparative", "rotation", "mixed", "all"],
+        format_func=lambda x: {
+            "comparative": "Comparative Analysis",
+            "rotation": "Crop Rotation Analysis", 
+            "mixed": "Mixed Farming Analysis",
+            "all": "Comprehensive Analysis"
+        }[x]
+    )
+
+with col_multi2:
+    if len(selected_crops) >= 2:
+        if st.button("🔍 Run Multi-Crop Analysis", type="primary"):
+            with st.spinner("Analyzing multiple crops..."):
+                # Run multi-crop analysis
+                if 'weather_data' in st.session_state:
+                    multi_results = multi_crop_analyzer.analyze_multiple_crops(
+                        [crop.lower() for crop in selected_crops],
+                        current_region,
+                        st.session_state.weather_data,
+                        analysis_type
+                    )
+                    st.session_state.multi_crop_results = multi_results
+                else:
+                    st.warning("Please load weather data first for comprehensive analysis")
+                    # Run without weather data
+                    multi_results = multi_crop_analyzer.analyze_multiple_crops(
+                        [crop.lower() for crop in selected_crops],
+                        current_region,
+                        {'current': {}},  # Empty weather data
+                        analysis_type
+                    )
+                    st.session_state.multi_crop_results = multi_results
+    else:
+        st.info("Select at least 2 crops to enable multi-crop analysis")
+
+# Display multi-crop analysis results
+if 'multi_crop_results' in st.session_state and st.session_state.multi_crop_results:
+    results = st.session_state.multi_crop_results
+    
+    if 'error' not in results:
+        st.subheader("📊 Analysis Results")
+        
+        # Summary metrics
+        col_sum1, col_sum2, col_sum3, col_sum4 = st.columns(4)
+        
+        with col_sum1:
+            st.metric("Crops Analyzed", len(results.get('crops_analyzed', [])))
+        
+        with col_sum2:
+            st.metric("Analysis Type", results.get('analysis_type', 'N/A').title())
+        
+        with col_sum3:
+            if 'comparative_analysis' in results and 'ranking' in results['comparative_analysis']:
+                ranking = results['comparative_analysis']['ranking'].get('by_suitability', [])
+                if ranking:
+                    best_crop, best_score = ranking[0]
+                    st.metric("Top Crop", best_crop.title(), f"{best_score:.1f}%")
+                else:
+                    st.metric("Top Crop", "N/A")
+            else:
+                st.metric("Top Crop", "N/A")
+        
+        with col_sum4:
+            if 'recommendations' in results and 'primary_recommendation' in results['recommendations']:
+                primary = results['recommendations']['primary_recommendation']
+                if primary:
+                    st.metric("Recommended", primary.get('recommended_crop', 'N/A').title())
+                else:
+                    st.metric("Recommended", "N/A")
+            else:
+                st.metric("Recommended", "N/A")
+        
+        # Detailed results tabs
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🏆 Comparative Analysis", 
+            "🔄 Rotation Analysis", 
+            "🌾 Mixed Farming", 
+            "💡 Recommendations"
+        ])
+        
+        with tab1:
+            # Comparative Analysis Results
+            if 'comparative_analysis' in results:
+                comp_analysis = results['comparative_analysis']
+                
+                # Ranking display
+                st.write("**🏆 Crop Suitability Ranking:**")
+                ranking = comp_analysis.get('ranking', {}).get('by_suitability', [])
+                
+                for i, (crop, score) in enumerate(ranking, 1):
+                    if i == 1:
+                        st.success(f"{i}. **{crop.title()}** - {score:.1f}% (Best Choice)")
+                    elif i == 2:
+                        st.info(f"{i}. **{crop.title()}** - {score:.1f}% (Good Alternative)")
+                    else:
+                        st.write(f"{i}. **{crop.title()}** - {score:.1f}%")
+                
+                # Profitability comparison
+                if 'profitability_comparison' in comp_analysis:
+                    st.write("**💰 Profitability Analysis:**")
+                    profit_data = comp_analysis['profitability_comparison']
+                    
+                    profit_ranking = profit_data.get('ranking', [])
+                    for i, (crop, data) in enumerate(profit_ranking[:3], 1):
+                        st.write(f"{i}. **{crop.title()}:** {data['profit_score']:.1f}% profitability score")
+                
+                # Strengths and weaknesses
+                st.write("**⚖️ Strengths & Weaknesses:**")
+                strengths_weaknesses = comp_analysis.get('strengths_weaknesses', {})
+                
+                for crop, sw_data in strengths_weaknesses.items():
+                    with st.expander(f"{crop.title()} - Strengths & Weaknesses"):
+                        col_str, col_weak = st.columns(2)
+                        
+                        with col_str:
+                            st.write("**✅ Strengths:**")
+                            for strength in sw_data.get('strengths', [])[:4]:
+                                st.write(f"• {strength}")
+                        
+                        with col_weak:
+                            st.write("**⚠️ Weaknesses:**")
+                            for weakness in sw_data.get('weaknesses', [])[:4]:
+                                st.write(f"• {weakness}")
+        
+        with tab2:
+            # Rotation Analysis Results
+            if 'rotation_analysis' in results:
+                rotation_analysis = results['rotation_analysis']
+                
+                st.write("**🔄 Recommended Crop Rotations:**")
+                recommended_rotations = rotation_analysis.get('recommended_rotations', [])
+                
+                for i, rotation in enumerate(recommended_rotations[:3], 1):
+                    sequence = rotation['sequence']
+                    score = rotation['overall_score']
+                    level = rotation['recommendation_level']
+                    
+                    if level == 'highly_recommended':
+                        st.success(f"**Rotation {i}:** {' → '.join([c.title() for c in sequence])} (Score: {score:.1f}%)")
+                    elif level == 'recommended':
+                        st.info(f"**Rotation {i}:** {' → '.join([c.title() for c in sequence])} (Score: {score:.1f}%)")
+                    else:
+                        st.write(f"**Rotation {i}:** {' → '.join([c.title() for c in sequence])} (Score: {score:.1f}%)")
+                    
+                    if rotation['key_benefits']:
+                        st.write("Benefits: " + ", ".join(rotation['key_benefits']))
+                
+                # Compatibility matrix
+                if 'compatibility_matrix' in rotation_analysis:
+                    st.write("**🔗 Crop Rotation Compatibility:**")
+                    comp_matrix = rotation_analysis['compatibility_matrix']
+                    
+                    for crop1, compatibilities in comp_matrix.items():
+                        st.write(f"**After {crop1.title()}:**")
+                        for crop2, compat_data in compatibilities.items():
+                            level = compat_data['level']
+                            score = compat_data['score']
+                            
+                            if level == 'excellent':
+                                st.success(f"  → {crop2.title()}: Excellent ({score}%)")
+                            elif level == 'good':
+                                st.info(f"  → {crop2.title()}: Good ({score}%)")
+                            elif level == 'fair':
+                                st.warning(f"  → {crop2.title()}: Fair ({score}%)")
+                            else:
+                                st.error(f"  → {crop2.title()}: Poor ({score}%)")
+            else:
+                st.info("Rotation analysis not available. Select 'rotation' or 'all' analysis type.")
+        
+        with tab3:
+            # Mixed Farming Analysis Results
+            if 'mixed_farming' in results:
+                mixed_analysis = results['mixed_farming']
+                
+                st.write("**🌾 Mixed Farming Recommendations:**")
+                recommended_combinations = mixed_analysis.get('recommended_combinations', [])
+                
+                if recommended_combinations:
+                    for i, combination in enumerate(recommended_combinations, 1):
+                        crops_combo = combination['combination']
+                        score = combination['compatibility_score']
+                        level = combination['recommendation_level']
+                        
+                        if level == 'highly_recommended':
+                            st.success(f"**Combination {i}:** {' + '.join([c.title() for c in crops_combo])} (Compatibility: {score:.1f}%)")
+                        elif level == 'recommended':
+                            st.info(f"**Combination {i}:** {' + '.join([c.title() for c in crops_combo])} (Compatibility: {score:.1f}%)")
+                        else:
+                            st.write(f"**Combination {i}:** {' + '.join([c.title() for c in crops_combo])} (Compatibility: {score:.1f}%)")
+                        
+                        if combination['key_benefits']:
+                            st.write("Benefits: " + ", ".join(combination['key_benefits']))
+                        
+                        if combination['potential_challenges']:
+                            st.write("Challenges: " + ", ".join(combination['potential_challenges']))
+                else:
+                    st.info("No highly compatible combinations found for mixed farming.")
+                
+                # Risk diversification analysis
+                if 'risk_diversification' in mixed_analysis:
+                    risk_div = mixed_analysis['risk_diversification']
+                    
+                    st.write("**⚖️ Risk Diversification Benefits:**")
+                    col_risk1, col_risk2, col_risk3 = st.columns(3)
+                    
+                    with col_risk1:
+                        st.metric("Market Risk Reduction", f"{risk_div.get('market_risk_reduction', 0):.1f}%")
+                    
+                    with col_risk2:
+                        st.metric("Weather Risk Distribution", f"{risk_div.get('weather_risk_distribution', 0):.1f}%")
+                    
+                    with col_risk3:
+                        st.metric("Pest/Disease Risk Reduction", f"{risk_div.get('pest_disease_risk_reduction', 0):.1f}%")
+            else:
+                st.info("Mixed farming analysis not available. Select 'mixed' or 'all' analysis type.")
+        
+        with tab4:
+            # Recommendations
+            if 'recommendations' in results:
+                recs = results['recommendations']
+                
+                # Primary recommendation
+                if 'primary_recommendation' in recs and recs['primary_recommendation']:
+                    primary = recs['primary_recommendation']
+                    st.success(f"**🎯 Primary Recommendation:** Focus on {primary.get('recommended_crop', 'N/A').title()}")
+                    st.write(f"**Reason:** {primary.get('reason', 'No reason provided')}")
+                
+                # Alternative strategies
+                if 'alternative_strategies' in recs:
+                    st.write("**🔄 Alternative Strategies:**")
+                    for strategy in recs['alternative_strategies']:
+                        st.write(f"• {strategy}")
+                
+                # Optimization suggestions
+                if 'optimization_suggestions' in recs:
+                    st.write("**⚡ Optimization Suggestions:**")
+                    for suggestion in recs['optimization_suggestions'][:5]:
+                        st.write(f"• {suggestion}")
+                
+                # Risk mitigation
+                if 'risk_mitigation' in recs:
+                    st.write("**🛡️ Risk Mitigation:**")
+                    for mitigation in recs['risk_mitigation'][:4]:
+                        st.write(f"• {mitigation}")
+                
+                # Next steps
+                if 'next_steps' in recs:
+                    st.write("**📋 Next Steps:**")
+                    for step in recs['next_steps'][:4]:
+                        st.write(f"• {step}")
+    else:
+        st.error(f"Analysis failed: {results.get('error', 'Unknown error')}")
 
 with col2:
     st.header("🤖 AI Analysis")
