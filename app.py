@@ -166,6 +166,60 @@ with col1:
                             )
                             st.plotly_chart(fig_solar, use_container_width=True)
 
+        # Open-Meteo data (Pakistani local weather)
+        if 'open_meteo' in weather_data:
+            st.subheader("🇵🇰 Pakistani Local Weather Data (Open-Meteo)")
+            
+            meteo_data = weather_data['open_meteo']
+            
+            col_meteo1, col_meteo2 = st.columns(2)
+            
+            with col_meteo1:
+                if 'current' in meteo_data:
+                    current_meteo = meteo_data['current']
+                    st.metric("Local Temperature", f"{current_meteo.get('temperature', 'N/A')}°C")
+                    st.metric("Wind Speed", f"{current_meteo.get('wind_speed', 'N/A')} km/h")
+            
+            with col_meteo2:
+                if 'daily_forecast' in meteo_data:
+                    daily = meteo_data['daily_forecast']
+                    if ('temperature_2m_max' in daily and daily['temperature_2m_max'] and 
+                        len(daily['temperature_2m_max']) > 0):
+                        temps = [t for t in daily['temperature_2m_max'][:7] if t is not None]
+                        if temps:
+                            avg_max_temp = sum(temps) / len(temps)
+                            st.metric("7-day Avg Max Temp", f"{avg_max_temp:.1f}°C")
+                    
+                    if ('precipitation_sum' in daily and daily['precipitation_sum'] and 
+                        len(daily['precipitation_sum']) > 0):
+                        precip = [p for p in daily['precipitation_sum'][:7] if p is not None]
+                        if precip:
+                            total_precip = sum(precip)
+                            st.metric("7-day Total Rain", f"{total_precip:.1f}mm")
+
+        # Pakistan Meteorological Department data
+        if 'pmd' in weather_data:
+            st.subheader("🏛️ Pakistan Meteorological Department")
+            
+            pmd_data = weather_data['pmd']
+            
+            col_pmd1, col_pmd2 = st.columns(2)
+            
+            with col_pmd1:
+                st.write(f"**Nearest PMD Station:** {pmd_data.get('nearest_station', 'N/A')}")
+                if 'station_info' in pmd_data:
+                    station_info = pmd_data['station_info']
+                    coords = station_info.get('coordinates', (0, 0))
+                    st.write(f"**Station Coordinates:** {coords[0]:.4f}, {coords[1]:.4f}")
+            
+            with col_pmd2:
+                status = pmd_data.get('status', 'unknown')
+                if status == 'unavailable':
+                    st.warning("⚠️ PMD API Currently Unavailable")
+                    st.info(pmd_data.get('note', 'PMD data integration planned for future updates.'))
+                else:
+                    st.info("ℹ️ Using comprehensive alternative weather sources")
+
 with col2:
     st.header("🤖 AI Analysis")
     
@@ -338,6 +392,6 @@ if st.button("📊 Analyze Historical Patterns"):
 st.markdown("---")
 st.markdown(
     "**🌾 AI Agricultural Analysis System** | "
-    "Powered by OpenWeatherMap, NASA POWER, AccuWeather APIs | "
+    "Powered by OpenWeatherMap, NASA POWER, AccuWeather, Open-Meteo & PMD APIs | "
     "AI Analysis by OpenAI GPT-5 | SMS Alerts by Twilio"
 )

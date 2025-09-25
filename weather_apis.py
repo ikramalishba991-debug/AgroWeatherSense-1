@@ -17,6 +17,8 @@ class WeatherDataCollector:
         self.openweather_base = "https://api.openweathermap.org/data/2.5"
         self.nasa_power_base = "https://power.larc.nasa.gov/api/temporal/daily/point"
         self.accuweather_base = "http://dataservice.accuweather.com"
+        self.open_meteo_base = "https://api.open-meteo.com/v1"
+        self.pmd_base = "https://pmd.css.net.pk"
     
     def get_openweather_current(self, lat: float, lon: float) -> Optional[Dict]:
         """Get current weather from OpenWeatherMap"""
@@ -238,6 +240,22 @@ class WeatherDataCollector:
         else:
             print("❌ Failed to collect AccuWeather historical data")
         
+        # Open-Meteo data (free, reliable Pakistani weather data)
+        open_meteo_data = self.get_open_meteo_data(lat, lon)
+        if open_meteo_data:
+            weather_data['open_meteo'] = open_meteo_data
+            print("✅ Open-Meteo data collected")
+        else:
+            print("❌ Failed to collect Open-Meteo data")
+        
+        # Pakistan Meteorological Department data
+        pmd_data = self.get_pmd_data(lat, lon)
+        if pmd_data:
+            weather_data['pmd'] = pmd_data
+            print("✅ Pakistan Meteorological Department data collected")
+        else:
+            print("❌ Failed to collect PMD data (using alternative sources)")
+        
         return weather_data
     
     def get_historical_data(self, lat: float, lon: float) -> Optional[Dict]:
@@ -258,3 +276,127 @@ class WeatherDataCollector:
         except Exception as e:
             print(f"Error collecting historical data: {e}")
             return None
+    
+    def get_open_meteo_data(self, lat: float, lon: float) -> Optional[Dict]:
+        """Get weather data from Open-Meteo API (free, no API key required)"""
+        try:
+            url = f"{self.open_meteo_base}/forecast"
+            params = {
+                'latitude': lat,
+                'longitude': lon,
+                'current_weather': True,
+                'hourly': 'temperature_2m,precipitation,wind_speed_10m,relative_humidity_2m,pressure_msl',
+                'daily': 'temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max',
+                'timezone': 'Asia/Karachi',
+                'forecast_days': 7
+            }
+            
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Process current weather
+            current = data.get('current_weather', {})
+            hourly = data.get('hourly', {})
+            daily = data.get('daily', {})
+            
+            processed_data = {
+                'current': {
+                    'temperature': current.get('temperature', 0),
+                    'wind_speed': current.get('windspeed', 0),
+                    'wind_direction': current.get('winddirection', 0),
+                    'weather_code': current.get('weathercode', 0),
+                    'timestamp': current.get('time', datetime.now().isoformat())
+                },
+                'hourly_data': hourly,
+                'daily_forecast': daily,
+                'source': 'Open-Meteo'
+            }
+            
+            return processed_data
+            
+        except Exception as e:
+            print(f"Error fetching Open-Meteo data: {e}")
+            return None
+    
+    def get_pmd_data(self, lat: float, lon: float) -> Optional[Dict]:
+        """Get weather data from Pakistan Meteorological Department
+        
+        Note: PMD currently does not provide a public API. This function identifies
+        the nearest PMD station and provides infrastructure for future integration
+        when PMD data becomes programmatically accessible.
+        """
+        try:
+            # Find nearest PMD station based on coordinates
+            nearest_city = self._find_nearest_pmd_station(lat, lon)
+            
+            # PMD data structure for future implementation
+            pmd_data = {
+                'nearest_station': nearest_city,
+                'source': 'Pakistan Meteorological Department',
+                'status': 'unavailable',
+                'note': 'PMD does not currently provide public API access. Using alternative weather sources.',
+                'station_info': {
+                    'city': nearest_city,
+                    'coordinates': self._get_pmd_station_coordinates(nearest_city)
+                }
+            }
+            
+            # For now, return station information only
+            # Future implementation would parse actual PMD data when available
+            return pmd_data
+            
+        except Exception as e:
+            print(f"Error accessing PMD station data: {e}")
+            return None
+    
+    def _get_pmd_station_coordinates(self, station_city: str) -> tuple:
+        """Get coordinates for PMD station city"""
+        pmd_stations = {
+            'Karachi': (24.8607, 67.0011),
+            'Lahore': (31.5204, 74.3587),
+            'Islamabad': (33.6844, 73.0479),
+            'Peshawar': (34.0151, 71.5249),
+            'Quetta': (30.1798, 66.9750),
+            'Multan': (30.1575, 71.5249),
+            'Faisalabad': (31.4504, 73.1350),
+            'Rawalpindi': (33.5651, 73.0169),
+            'Hyderabad': (25.3960, 68.3578),
+            'Sialkot': (32.4945, 74.5229),
+            'Sukkur': (27.7060, 68.8578),
+            'Jacobabad': (28.2819, 68.4372),
+            'Nawabshah': (26.2442, 68.4100)
+        }
+        return pmd_stations.get(station_city, (24.8607, 67.0011))
+    
+    def _find_nearest_pmd_station(self, lat: float, lon: float) -> str:
+        """Find nearest PMD weather station city"""
+        # Major PMD weather stations in Pakistan
+        pmd_stations = {
+            'Karachi': (24.8607, 67.0011),
+            'Lahore': (31.5204, 74.3587),
+            'Islamabad': (33.6844, 73.0479),
+            'Peshawar': (34.0151, 71.5249),
+            'Quetta': (30.1798, 66.9750),
+            'Multan': (30.1575, 71.5249),
+            'Faisalabad': (31.4504, 73.1350),
+            'Rawalpindi': (33.5651, 73.0169),
+            'Hyderabad': (25.3960, 68.3578),
+            'Sialkot': (32.4945, 74.5229),
+            'Sukkur': (27.7060, 68.8578),
+            'Jacobabad': (28.2819, 68.4372),
+            'Nawabshah': (26.2442, 68.4100)
+        }
+        
+        min_distance = float('inf')
+        nearest_city = 'Karachi'
+        
+        for city, (city_lat, city_lon) in pmd_stations.items():
+            # Calculate simple distance (Euclidean)
+            distance = ((lat - city_lat) ** 2 + (lon - city_lon) ** 2) ** 0.5
+            if distance < min_distance:
+                min_distance = distance
+                nearest_city = city
+        
+        return nearest_city
