@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import calendar
 import json
 
 from weather_apis import WeatherDataCollector
@@ -11,6 +12,7 @@ from sms_service import SMSService
 from crop_data import CropDatabase
 from data_processor import DataProcessor
 from soil_database import SoilDatabase
+from seasonal_calendar import PakistanFarmingCalendar
 from utils import get_pakistan_coordinates, validate_phone_number, determine_weather_region
 
 # Page configuration
@@ -29,10 +31,11 @@ def initialize_services():
     crop_db = CropDatabase()
     data_processor = DataProcessor()
     soil_db = SoilDatabase()
+    farming_calendar = PakistanFarmingCalendar()
     
-    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db
+    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar
 
-weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db = initialize_services()
+weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db, farming_calendar = initialize_services()
 
 # Main title
 st.title("🌾 AI-Powered Agricultural Analysis System")
@@ -405,6 +408,114 @@ with col1:
                                     st.write(f"• **{readable_key}:** {value}")
         else:
             st.info(f"No specific soil data available for {current_region} region. Using general recommendations.")
+
+# New section for Seasonal Farming Calendar
+st.markdown("---")
+st.header("📅 Seasonal Farming Calendar")
+
+# Get current regional farming activities
+current_month = datetime.now().month
+regional_calendar = farming_calendar.get_regional_calendar(current_region, current_month)
+
+col_cal1, col_cal2 = st.columns(2)
+
+with col_cal1:
+    st.subheader(f"🌾 Current Activities - {regional_calendar['month']}")
+    st.write(f"**Season:** {regional_calendar['current_season'].title()}")
+    
+    # Display current crop activities
+    if regional_calendar['crop_activities']:
+        for crop, activity_data in regional_calendar['crop_activities'].items():
+            if crop == crop_type.lower():  # Highlight selected crop
+                st.success(f"**{crop.title()} (Selected Crop):**")
+            else:
+                st.write(f"**{crop.title()}:**")
+            
+            if 'current_activities' in activity_data:
+                for activity in activity_data['current_activities']:
+                    st.write(f"• {activity['description']}")
+            else:
+                st.write(f"• {activity_data.get('description', 'Maintenance period')}")
+    else:
+        st.info("No specific crop activities scheduled for this month in your region.")
+
+with col_cal2:
+    st.subheader("🎯 Priority Recommendations")
+    
+    # Get seasonal recommendations based on current weather
+    if 'weather_data' in st.session_state and 'current' in st.session_state.weather_data:
+        seasonal_recs = farming_calendar.get_seasonal_recommendations(
+            current_region, 
+            st.session_state.weather_data['current']
+        )
+        
+        st.write("**Priority Crops for This Season:**")
+        for crop in seasonal_recs['priority_crops']:
+            if crop == crop_type.lower():
+                st.success(f"✅ {crop.title()} (Your selected crop)")
+            else:
+                st.write(f"• {crop.title()}")
+        
+        if seasonal_recs['irrigation_advice']:
+            st.write("**Irrigation Advice:**")
+            for advice in seasonal_recs['irrigation_advice']:
+                st.write(f"💧 {advice}")
+        
+        if seasonal_recs['pest_disease_alerts']:
+            st.write("**Pest & Disease Alerts:**")
+            for alert in seasonal_recs['pest_disease_alerts']:
+                st.warning(f"⚠️ {alert}")
+    else:
+        st.info("Load weather data to get personalized seasonal recommendations.")
+
+# Detailed crop schedule for selected crop
+st.subheader(f"📋 Detailed Schedule for {crop_type}")
+crop_schedule = farming_calendar.get_crop_schedule(crop_type.lower(), current_region)
+
+if 'error' not in crop_schedule:
+    col_sched1, col_sched2, col_sched3 = st.columns(3)
+    
+    with col_sched1:
+        st.write("**Schedule Overview:**")
+        schedule = crop_schedule['schedule']
+        for activity, timing in schedule.items():
+            if isinstance(timing, dict) and 'start_month' in timing:
+                start_month = calendar.month_name[timing['start_month']]
+                end_month = calendar.month_name[timing['end_month']]
+                st.write(f"• **{activity.replace('_', ' ').title()}:** {start_month} - {end_month}")
+    
+    with col_sched2:
+        st.write("**Current Month Activity:**")
+        current_activity = crop_schedule.get('current_month_activity', {})
+        if 'current_activities' in current_activity:
+            for activity in current_activity['current_activities']:
+                st.write(f"🎯 {activity['description']}")
+        else:
+            st.write(current_activity.get('description', 'General maintenance period'))
+        
+        if 'recommendations' in current_activity:
+            st.write("**Action Items:**")
+            for i, rec in enumerate(current_activity['recommendations'][:4], 1):
+                st.write(f"{i}. {rec}")
+    
+    with col_sched3:
+        st.write("**Recommended Varieties:**")
+        varieties = crop_schedule.get('varieties', {})
+        if varieties:
+            for variety_type, variety_list in varieties.items():
+                st.write(f"**{variety_type.replace('_', ' ').title()}:**")
+                st.write(", ".join(variety_list[:3]))  # Show first 3 varieties
+        else:
+            st.write("Contact local agriculture extension for variety recommendations.")
+    
+    # Display any critical periods
+    if regional_calendar['critical_periods']:
+        st.write("**⚠️ Critical Periods This Month:**")
+        for period in regional_calendar['critical_periods']:
+            st.warning(f"**{period['name'].replace('_', ' ').title()}:** {period['period']}")
+            st.write("Critical factors: " + ", ".join(period['critical_factors']))
+else:
+    st.error(f"Could not load schedule for {crop_type}: {crop_schedule.get('error', 'Unknown error')}")
 
 with col2:
     st.header("🤖 AI Analysis")
