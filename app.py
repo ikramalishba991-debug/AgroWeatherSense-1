@@ -10,7 +10,8 @@ from ai_analysis import AgriculturalAnalyzer
 from sms_service import SMSService
 from crop_data import CropDatabase
 from data_processor import DataProcessor
-from utils import get_pakistan_coordinates, validate_phone_number
+from soil_database import SoilDatabase
+from utils import get_pakistan_coordinates, validate_phone_number, determine_weather_region
 
 # Page configuration
 st.set_page_config(
@@ -27,10 +28,11 @@ def initialize_services():
     sms_service = SMSService()
     crop_db = CropDatabase()
     data_processor = DataProcessor()
+    soil_db = SoilDatabase()
     
-    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor
+    return weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db
 
-weather_collector, ai_analyzer, sms_service, crop_db, data_processor = initialize_services()
+weather_collector, ai_analyzer, sms_service, crop_db, data_processor, soil_db = initialize_services()
 
 # Main title
 st.title("🌾 AI-Powered Agricultural Analysis System")
@@ -219,6 +221,190 @@ with col1:
                     st.info(pmd_data.get('note', 'PMD data integration planned for future updates.'))
                 else:
                     st.info("ℹ️ Using comprehensive alternative weather sources")
+
+        # Soil Analysis Section
+        st.subheader("🌱 Soil Analysis & Thermal Properties")
+        
+        # Get soil data for current location
+        current_region = determine_weather_region(lat, lon)
+        available_soils = soil_db.get_soil_by_coordinates(lat, lon)
+        
+        if available_soils:
+            # Soil selection
+            soil_names = [soil["name"] for soil in available_soils]
+            selected_soil_name = st.selectbox("Select Soil Type for Analysis", soil_names)
+            
+            # Find selected soil data
+            selected_soil = next((soil for soil in available_soils if soil["name"] == selected_soil_name), None)
+            
+            if selected_soil:
+                col_soil1, col_soil2, col_soil3 = st.columns(3)
+                
+                with col_soil1:
+                    st.write("**Soil Properties:**")
+                    st.write(f"Region: {selected_soil['region']}")
+                    st.write(f"Type: {selected_soil['soil_type']}")
+                    ph_range = selected_soil['ph_range']
+                    st.write(f"pH Range: {ph_range['min']} - {ph_range['max']}")
+                    
+                with col_soil2:
+                    st.write("**Thermal Properties:**")
+                    thermal = selected_soil['thermal_properties']
+                    st.write(f"Conductivity: {thermal['thermal_conductivity']} W/m·K")
+                    st.write(f"Heat Capacity: {thermal['heat_capacity']} MJ/m³·K")
+                    st.write(f"Bulk Density: {thermal['bulk_density']} g/cm³")
+                
+                with col_soil3:
+                    st.write("**Water Properties:**")
+                    water = selected_soil['water_properties']
+                    st.write(f"Field Capacity: {water['field_capacity']}%")
+                    st.write(f"Available Water: {water['available_water']}%")
+                    st.write(f"Drainage: {water['drainage'].title()}")
+                
+                # Thermal analysis with current weather
+                if 'weather_data' in st.session_state and 'current' in st.session_state.weather_data:
+                    current_weather = st.session_state.weather_data['current']
+                    current_temp = current_weather.get('temperature', 25)
+                    current_humidity = current_weather.get('humidity', 60)
+                    
+                    # Calculate soil moisture based on weather data
+                    recent_precip = 0
+                    if 'forecast' in st.session_state.weather_data:
+                        forecast = st.session_state.weather_data['forecast']
+                        recent_precip = sum(day.get('precipitation', 0) for day in forecast[:3])
+                    
+                    # Simple soil moisture estimation
+                    base_moisture = water['field_capacity'] * 0.6  # Base level
+                    precip_contribution = min(recent_precip * 0.5, water['field_capacity'] * 0.3)
+                    humidity_factor = (current_humidity - 50) / 100 * water['field_capacity'] * 0.1
+                    
+                    soil_moisture = max(water['wilting_point'], 
+                                      min(water['field_capacity'], 
+                                          base_moisture + precip_contribution + humidity_factor))
+                    
+                    # Get soil type key
+                    soil_type_key = None
+                    for key, soil_data in soil_db.soil_data.items():
+                        if soil_data["name"] == selected_soil_name:
+                            soil_type_key = key
+                            break
+                    
+                    if soil_type_key:
+                        thermal_analysis = soil_db.get_soil_thermal_analysis(soil_type_key, current_temp, soil_moisture)
+                        
+                        st.subheader("🌡️ Real-time Soil Thermal Analysis")
+                        
+                        col_thermal1, col_thermal2 = st.columns(2)
+                        
+                        with col_thermal1:
+                            st.write("**Current Conditions:**")
+                            metrics = thermal_analysis['thermal_metrics']
+                            st.metric("Root Zone Temperature", f"{metrics['root_zone_temperature']}°C")
+                            st.write(f"**Temperature Stability:** {metrics['temperature_stability']}")
+                            
+                        with col_thermal2:
+                            st.write("**Agricultural Impact:**")
+                            impact = thermal_analysis['agricultural_impact']
+                            st.write(f"**Germination Suitability:** {impact['seed_germination_suitability']}")
+                            st.write(f"**Root Development:** {impact['root_development_conditions']}")
+                            
+                            # Display calculated soil moisture
+                            st.metric("Estimated Soil Moisture", f"{soil_moisture:.1f}%")
+                
+                # Crop-soil compatibility
+                st.subheader("🌾 Crop-Soil Compatibility Analysis")
+                
+                if soil_type_key:
+                    compatibility = soil_db.get_crop_soil_compatibility(crop_type, soil_type_key)
+                    
+                    col_compat1, col_compat2 = st.columns(2)
+                    
+                    with col_compat1:
+                        # Enhanced compatibility display
+                        score = compatibility['suitability_score']
+                        if score >= 80:
+                            st.success(f"✅ Excellent match: {crop_type} is highly suitable for this soil")
+                        elif score >= 60:
+                            st.success(f"✅ Good match: {crop_type} is suitable for this soil")
+                        elif score >= 40:
+                            st.warning(f"⚠️ Moderate match: {crop_type} can grow but may need extra care")
+                        else:
+                            st.error(f"❌ Poor match: {crop_type} may face significant challenges")
+                        
+                        st.metric("Suitability Score", f"{score}/100")
+                        
+                        # Display specific suitable crops for comparison
+                        suitable_crops = selected_soil['agricultural_characteristics']['suitable_crops']
+                        st.write("**Best crops for this soil:**")
+                        st.write(", ".join(suitable_crops))
+                    
+                    with col_compat2:
+                        st.write("**Specific Recommendations:**")
+                        for i, rec in enumerate(compatibility['recommendations'][:5], 1):
+                            st.write(f"{i}. {rec}")
+                        
+                        # Show irrigation and fertilizer needs
+                        agri_chars = selected_soil['agricultural_characteristics']
+                        st.write(f"**Irrigation Frequency:** {agri_chars['irrigation_frequency']}")
+                        st.write(f"**Fertilizer Retention:** {agri_chars['fertilizer_retention']}")
+                        
+                        if agri_chars['compaction_risk'] in ['high', 'very high']:
+                            st.warning("⚠️ High compaction risk - avoid working wet soil")
+                
+                # Enhanced Seasonal soil management
+                current_month = datetime.now().month
+                current_season = "winter" if current_month in [12, 1, 2] else \
+                               "summer" if current_month in [3, 4, 5, 10, 11] else "monsoon"
+                
+                if soil_type_key:
+                    seasonal_mgmt = soil_db.get_seasonal_soil_management(soil_type_key, current_season)
+                    
+                    if 'error' not in seasonal_mgmt:
+                        st.subheader(f"🗓️ {seasonal_mgmt['season']} Soil Management ({datetime.now().strftime('%B %Y')})")
+                        
+                        col_season1, col_season2, col_season3 = st.columns(3)
+                        
+                        with col_season1:
+                            st.write("**Management Priorities:**")
+                            priorities = seasonal_mgmt['management_priorities']
+                            if priorities:
+                                for priority in priorities:
+                                    st.write(f"🎯 {priority}")
+                            else:
+                                st.write("No specific priorities for this season")
+                            
+                        with col_season2:
+                            st.write("**Risk Factors:**")
+                            risks = seasonal_mgmt['risk_factors']
+                            if risks:
+                                for risk in risks:
+                                    st.write(f"⚠️ {risk}")
+                            else:
+                                st.success("✅ Low risk season")
+                                
+                        with col_season3:
+                            st.write("**Recommended Practices:**")
+                            practices = seasonal_mgmt.get('recommended_practices', [])
+                            for i, practice in enumerate(practices[:4], 1):
+                                st.write(f"{i}. {practice}")
+                        
+                        # Seasonal behavior details
+                        behavior = seasonal_mgmt.get('behavior', {})
+                        if behavior:
+                            st.write("**Seasonal Soil Behavior:**")
+                            col_behav1, col_behav2 = st.columns(2)
+                            
+                            with col_behav1:
+                                for key, value in list(behavior.items())[:3]:
+                                    readable_key = key.replace('_', ' ').title()
+                                    st.write(f"• **{readable_key}:** {value}")
+                            
+                            with col_behav2:
+                                for key, value in list(behavior.items())[3:]:
+                                    readable_key = key.replace('_', ' ').title()
+                                    st.write(f"• **{readable_key}:** {value}")
+        else:
+            st.info(f"No specific soil data available for {current_region} region. Using general recommendations.")
 
 with col2:
     st.header("🤖 AI Analysis")
