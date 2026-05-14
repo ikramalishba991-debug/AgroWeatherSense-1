@@ -208,22 +208,64 @@ class WeatherDataCollector:
         
         print(f"Collecting weather data for coordinates: {lat}, {lon}")
         
+        # Open-Meteo data first (free, no API key required — most reliable source)
+        open_meteo_data = self.get_open_meteo_data(lat, lon)
+        if open_meteo_data:
+            weather_data['open_meteo'] = open_meteo_data
+            print("✅ Open-Meteo data collected")
+        else:
+            print("❌ Failed to collect Open-Meteo data")
+
         # OpenWeatherMap current weather
         current_weather = self.get_openweather_current(lat, lon)
         if current_weather:
             weather_data['current'] = current_weather
             print("✅ OpenWeatherMap current data collected")
         else:
-            print("❌ Failed to collect OpenWeatherMap current data")
-        
+            print("⚠️ OpenWeatherMap current data unavailable — falling back to Open-Meteo")
+            # Fall back to Open-Meteo current data if OpenWeatherMap is unavailable
+            if open_meteo_data and 'current' in open_meteo_data:
+                om_current = open_meteo_data['current']
+                weather_data['current'] = {
+                    'temperature': om_current.get('temperature', 0),
+                    'humidity': 60,  # Open-Meteo free tier doesn't include humidity in current
+                    'pressure': 1013,
+                    'wind_speed': round(om_current.get('wind_speed', 0) / 3.6, 2),  # km/h → m/s
+                    'weather_condition': 'Data from Open-Meteo',
+                    'visibility': 10,
+                    'timestamp': om_current.get('timestamp', datetime.now().isoformat()),
+                    'source': 'Open-Meteo (fallback)'
+                }
+
         # OpenWeatherMap forecast
         forecast_data = self.get_openweather_forecast(lat, lon)
         if forecast_data:
             weather_data['forecast'] = forecast_data
             print("✅ OpenWeatherMap forecast data collected")
         else:
-            print("❌ Failed to collect OpenWeatherMap forecast data")
-        
+            print("⚠️ OpenWeatherMap forecast unavailable — using Open-Meteo daily forecast")
+            # Build a forecast list from Open-Meteo daily data
+            if open_meteo_data and 'daily_forecast' in open_meteo_data:
+                daily = open_meteo_data['daily_forecast']
+                times = daily.get('time', [])
+                temp_max = daily.get('temperature_2m_max', [])
+                temp_min = daily.get('temperature_2m_min', [])
+                precip = daily.get('precipitation_sum', [])
+                wind_max = daily.get('windspeed_10m_max', [])
+                fallback_forecast = []
+                for i, t in enumerate(times[:7]):
+                    fallback_forecast.append({
+                        'date': t,
+                        'temp_max': temp_max[i] if i < len(temp_max) else 0,
+                        'temp_min': temp_min[i] if i < len(temp_min) else 0,
+                        'precipitation': precip[i] if i < len(precip) else 0,
+                        'avg_humidity': 60,
+                        'avg_wind_speed': round((wind_max[i] if i < len(wind_max) else 0) / 3.6, 2),
+                        'conditions': ['Open-Meteo data']
+                    })
+                if fallback_forecast:
+                    weather_data['forecast'] = fallback_forecast
+
         # NASA POWER data
         nasa_data = self.get_nasa_power_data(lat, lon)
         if nasa_data:
@@ -231,7 +273,7 @@ class WeatherDataCollector:
             print("✅ NASA POWER data collected")
         else:
             print("❌ Failed to collect NASA POWER data")
-        
+
         # AccuWeather historical data
         historical_data = self.get_accuweather_historical(lat, lon)
         if historical_data:
@@ -239,15 +281,7 @@ class WeatherDataCollector:
             print("✅ AccuWeather historical data collected")
         else:
             print("❌ Failed to collect AccuWeather historical data")
-        
-        # Open-Meteo data (free, reliable Pakistani weather data)
-        open_meteo_data = self.get_open_meteo_data(lat, lon)
-        if open_meteo_data:
-            weather_data['open_meteo'] = open_meteo_data
-            print("✅ Open-Meteo data collected")
-        else:
-            print("❌ Failed to collect Open-Meteo data")
-        
+
         # Pakistan Meteorological Department data
         pmd_data = self.get_pmd_data(lat, lon)
         if pmd_data:
@@ -255,7 +289,7 @@ class WeatherDataCollector:
             print("✅ Pakistan Meteorological Department data collected")
         else:
             print("❌ Failed to collect PMD data (using alternative sources)")
-        
+
         return weather_data
     
     def get_historical_data(self, lat: float, lon: float) -> Optional[Dict]:

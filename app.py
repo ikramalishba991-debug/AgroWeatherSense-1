@@ -77,6 +77,9 @@ crop_type = st.sidebar.selectbox(
     ["Wheat", "Rice", "Cotton", "Sugarcane", "Maize", "Barley", "Millet", "Sorghum"]
 )
 
+# Determine region before column layout (used in both col1 and top-level sections)
+current_region = determine_weather_region(lat, lon)
+
 # Main content area
 col1, col2 = st.columns([2, 1])
 
@@ -100,6 +103,9 @@ with col1:
                 st.error(f"❌ Error collecting data: {str(e)}")
 
     # Display weather data if available
+    if 'weather_data' not in st.session_state:
+        st.info("👆 Click **Collect Latest Weather Data** above to load real-time weather information for your selected location.")
+
     if 'weather_data' in st.session_state:
         weather_data = st.session_state.weather_data
         
@@ -231,7 +237,6 @@ with col1:
         st.subheader("🌱 Soil Analysis & Thermal Properties")
         
         # Get soil data for current location
-        current_region = determine_weather_region(lat, lon)
         available_soils = soil_db.get_soil_by_coordinates(lat, lon)
         
         if available_soils:
@@ -266,6 +271,13 @@ with col1:
                     st.write(f"Available Water: {water['available_water']}%")
                     st.write(f"Drainage: {water['drainage'].title()}")
                 
+                # Resolve soil type key for this selected soil (needed across multiple sections below)
+                soil_type_key = None
+                for key, soil_data in soil_db.soil_data.items():
+                    if soil_data["name"] == selected_soil_name:
+                        soil_type_key = key
+                        break
+
                 # Thermal analysis with current weather
                 if 'weather_data' in st.session_state and 'current' in st.session_state.weather_data:
                     current_weather = st.session_state.weather_data['current']
@@ -286,13 +298,6 @@ with col1:
                     soil_moisture = max(water['wilting_point'], 
                                       min(water['field_capacity'], 
                                           base_moisture + precip_contribution + humidity_factor))
-                    
-                    # Get soil type key
-                    soil_type_key = None
-                    for key, soil_data in soil_db.soil_data.items():
-                        if soil_data["name"] == selected_soil_name:
-                            soil_type_key = key
-                            break
                     
                     if soil_type_key:
                         thermal_analysis = soil_db.get_soil_thermal_analysis(soil_type_key, current_temp, soil_moisture)
@@ -829,6 +834,10 @@ with col2:
         else:
             st.warning("⚠️ Please collect weather data first.")
     
+    # Prompt when no insights loaded yet
+    if 'ai_insights' not in st.session_state:
+        st.info("💡 Collect weather data first, then click **Generate AI Insights** to receive personalised agricultural recommendations for your crop and location.")
+
     # Display AI insights
     if 'ai_insights' in st.session_state:
         insights = st.session_state.ai_insights
@@ -885,8 +894,11 @@ with col_sms1:
                         message += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
                         
                         # Send SMS
-                        sms_service.send_alert(phone_number, message)
-                        st.success("✅ SMS sent successfully!")
+                        sms_sent = sms_service.send_alert(phone_number, message)
+                        if sms_sent:
+                            st.success("✅ SMS sent successfully!")
+                        else:
+                            st.error("❌ SMS delivery failed. Please check your Twilio credentials and phone number.")
                         
                     except Exception as e:
                         st.error(f"❌ Failed to send SMS: {str(e)}")

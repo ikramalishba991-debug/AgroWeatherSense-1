@@ -47,7 +47,7 @@ class AgriculturalAnalyzer:
             return None
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-5",
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
@@ -60,18 +60,22 @@ class AgriculturalAnalyzer:
             return None
 
     def _call_ai(self, system_prompt: str, user_prompt: str) -> Optional[Dict]:
-        """Try Gemini first, fall back to OpenAI, return parsed JSON dict"""
+        """Try Gemini first, fall back to OpenAI, return parsed JSON dict with provider info"""
         raw = self._call_gemini(system_prompt, user_prompt)
         if raw:
             try:
-                return json.loads(raw)
+                result = json.loads(raw)
+                result['_ai_provider'] = 'Gemini'
+                return result
             except json.JSONDecodeError as e:
                 print(f"Gemini JSON parse error: {e}")
 
         raw = self._call_openai(system_prompt, user_prompt)
         if raw:
             try:
-                return json.loads(raw)
+                result = json.loads(raw)
+                result['_ai_provider'] = 'OpenAI'
+                return result
             except json.JSONDecodeError as e:
                 print(f"OpenAI JSON parse error: {e}")
 
@@ -110,7 +114,7 @@ Respond with a JSON object containing:
                 result['analysis_timestamp'] = datetime.now().isoformat()
                 result['location'] = location
                 result['crop_analyzed'] = crop_type
-                result['ai_provider'] = 'Gemini' if self.gemini_model else 'OpenAI'
+                result['ai_provider'] = result.pop('_ai_provider', 'Unknown')
             return result
         except Exception as e:
             print(f"Error in AI analysis: {e}")

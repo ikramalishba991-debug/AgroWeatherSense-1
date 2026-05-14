@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from datetime import datetime
 from twilio.rest import Client
 
 class SMSService:
@@ -109,9 +110,9 @@ class SMSService:
             
             message += f"\n📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             message += "\n🤖 AI Agricultural Analysis System"
-            
+
             return self.send_alert(to_number, message)
-            
+
         except Exception as e:
             print(f"Error sending crop recommendation: {e}")
             return False
@@ -217,10 +218,7 @@ class SMSService:
 """
             
             return self.send_alert(to_number, message)
-            
+
         except Exception as e:
             print(f"Error sending harvest timing alert: {e}")
             return False
-
-# Import datetime for timestamp
-from datetime import datetime
